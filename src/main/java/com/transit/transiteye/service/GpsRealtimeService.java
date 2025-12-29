@@ -6,6 +6,7 @@ import com.transit.transiteye.model.CachedVehicle;
 import com.transit.transiteye.model.VehiclePosition;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.util.List;
@@ -20,27 +21,30 @@ public class GpsRealtimeService {
 
     private static final long FETCH_INTERVAL_MS = 10_000;
     private static final long VEHICLE_TTL_MS = 30_000;
-
+    private int consecutiveFailures = 0;
+    private long backoffUntil = 0;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<String, CachedVehicle> vehicleCache = new ConcurrentHashMap<>();
     private volatile long lastFetchTime = 0;
     private volatile boolean feedAvailable = false;
 
-
     public List<VehiclePosition> fetchRealtimePositions() {
         long now = System.currentTimeMillis();
+
+        if (now < backoffUntil) {
+            return currentVehiclesSnapshot();
+        }
+
         if (now - lastFetchTime >= FETCH_INTERVAL_MS) {
-            fetchAndUpdateCache();
+            fetchAndUpdateCacheWithRetry(now);
             lastFetchTime = now;
         }
-        evictStaleVehicles(now);
 
-        return vehicleCache.values().stream()
-                .map(CachedVehicle::getVehicle)
-                .toList();
+        evictStaleVehicles(now);
+        return currentVehiclesSnapshot();
     }
 
-    private void fetchAndUpdateCache() {
+    private void fetchAndUpdateCache() throws IOException {
         try (InputStream stream =
                      new URL(VEHICLE_POSITIONS_URL).openStream()) {
 
@@ -62,9 +66,13 @@ public class GpsRealtimeService {
                         node.get("vehicleCode").asText()
                 );
 
+                String routeId = normalizeRouteId(
+                        node.get("routeShortName").asText()
+                );
+
                 VehiclePosition vp = new VehiclePosition(
                         vehicleId,
-                        node.get("routeShortName").asText(),
+                        routeId,
                         lat,
                         lon,
                         node.get("delay").asInt(0)
@@ -79,7 +87,8 @@ public class GpsRealtimeService {
 
         } catch (Exception e) {
             feedAvailable = false;
-            // log WARN, ale NIE przerywamy działania
+            // log ERROR
+            throw e;
         }
     }
 
@@ -95,9 +104,46 @@ public class GpsRealtimeService {
         return vehicleCache.size();
     }
 
+    private void fetchAndUpdateCacheWithRetry(long now) {
+        try {
+            fetchAndUpdateCache();
+            consecutiveFailures = 0;
+            feedAvailable = true;
+
+        } catch (Exception e) {
+            consecutiveFailures++;
+            feedAvailable = false;
+
+            long delay = Math.min(
+                    60_000,
+                    (long) Math.pow(2, consecutiveFailures) * 1000
+            );
+
+            backoffUntil = now + delay;
+
+            // log WARN
+        }
+    }
+
+    private String normalizeRouteId(String raw) {
+        if (raw == null) return "UNKNOWN";
+
+        String normalized = raw.trim().toUpperCase();
+
+        if (normalized.isEmpty()) return "UNKNOWN";
+
+        return normalized;
+    }
+
     private void evictStaleVehicles(long now) {
         vehicleCache.entrySet().removeIf(entry ->
                 now - entry.getValue().getLastSeen() > VEHICLE_TTL_MS
         );
+    }
+
+    private List<VehiclePosition> currentVehiclesSnapshot() {
+        return vehicleCache.values().stream()
+                .map(CachedVehicle::getVehicle)
+                .toList();
     }
 }
