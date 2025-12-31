@@ -5,6 +5,5 @@ public record VehiclePosition(
         String routeId,
         double latitude,
         double longitude,
-
         int delay
 ) {}

@@ -1,7 +1,8 @@
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import { useEffect, useState } from 'react';
 import { Client } from '@stomp/stompjs';
-import L from 'leaflet';
+import VehicleMarker from './marker/VehicleMarker';
+import busIcon from "../assets/bus.png";
 import 'leaflet/dist/leaflet.css';
 
 interface Vehicle {
@@ -44,10 +45,9 @@ function App() {
   
     return () => {
       client.deactivate();
-      return; // Explicitly return void
+      return; 
     };
   }, []);
-
 
   const availableRoutes = Array.from(
     new Set(vehicles.map(v => v.routeId))
@@ -61,7 +61,7 @@ function App() {
   return (
 
     <div style={{ height: '100vh', width: '100vw' }}>
-  <div style={{ position: 'absolute', top: 10, left: 50, zIndex: 1000 }}>
+    <div style={{ position: 'absolute', top: 10, left: 50, zIndex: 1000 }}>
     <select
       value={selectedRoute}
       onChange={e => setSelectedRoute(e.target.value)}
@@ -83,26 +83,19 @@ function App() {
       maxBoundsViscosity={1.0}
       style={{ height: '100vh', width: '100vw' }}
     >
-      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
-      {filteredVehicles.map(v => {
-  const pos = animatedPositions[v.vehicleId];
-  if (!pos) return null;
-
-  return (
-    <Marker
-      key={v.vehicleId}
-      position={pos}
-    >
-      <Popup>
-        Linia: {v.routeId}<br />
-        ID: {v.vehicleId}
-      </Popup>
-    </Marker>
-  );
-})}
+    {filteredVehicles.map(v => (
+      <VehicleMarker
+        key={v.vehicleId}
+        vehicleId={v.vehicleId}
+        routeId={v.routeId}
+        lat={v.latitude}
+        lon={v.longitude}
+      />
+  ))}
     </MapContainer>
-    </div>
+  </div>
   );
 }
 
