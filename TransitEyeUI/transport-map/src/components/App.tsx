@@ -1,8 +1,9 @@
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Client } from '@stomp/stompjs';
 import VehicleMarker from './marker/VehicleMarker';
-import busIcon from "../assets/bus.png";
+import RouteFilter from './filter/RouteFilter';
+import NoVehiclesOverlay from './overlay/VehiclesOverlay';
 import 'leaflet/dist/leaflet.css';
 
 interface Vehicle {
@@ -16,10 +17,26 @@ const TROJMIASTO_BOUNDS: [[number, number], [number, number]] = [
   [54.27, 18.45],
   [54.62, 18.85],
 ];
+const ROUTE_STORAGE_KEY = 'selectedRoute';
+
 
 function App() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [selectedRoute, setSelectedRoute] = useState<string>('ALL');
+  const [selectedRoute, setSelectedRoute] = useState<string>(() => {
+    return localStorage.getItem(ROUTE_STORAGE_KEY) ?? 'ALL';
+  });
+
+  const availableRoutes = useMemo(() => {
+    return Array.from(
+      new Set(vehicles.map(v => v.routeId))
+    ).sort();
+  }, [vehicles]);
+
+  const filteredVehicles = useMemo(() => {
+    if (selectedRoute === 'ALL') return vehicles;
+    return vehicles.filter(v => v.routeId === selectedRoute);
+  }, [vehicles, selectedRoute]);
+
 
   useEffect(() => {
     const client = new Client({
@@ -49,53 +66,53 @@ function App() {
     };
   }, []);
 
-  const availableRoutes = Array.from(
-    new Set(vehicles.map(v => v.routeId))
-  ).sort();
+  useEffect(() => {
+    if (
+      selectedRoute !== 'ALL' &&
+      !availableRoutes.includes(selectedRoute)
+    ) {
+      setSelectedRoute('ALL');
+    }
+  }, [availableRoutes, selectedRoute]);
 
-  const filteredVehicles =
-  selectedRoute === 'ALL'
-    ? vehicles
-    : vehicles.filter(v => v.routeId === selectedRoute);
+  useEffect(() => {
+    localStorage.setItem(ROUTE_STORAGE_KEY, selectedRoute);
+  }, [selectedRoute]);
 
   return (
-
     <div style={{ height: '100vh', width: '100vw' }}>
-    <div style={{ position: 'absolute', top: 10, left: 50, zIndex: 1000 }}>
-    <select
-      value={selectedRoute}
-      onChange={e => setSelectedRoute(e.target.value)}
-    >
-      <option value="ALL">Wszystkie</option>
-      {availableRoutes.map(route => (
-        <option key={route} value={route}>
-          {route}
-        </option>
-      ))}
-    </select>
-  </div>
-    <MapContainer
-      center={[54.3520, 18.6466]}
-      zoom={13}
-      minZoom={11}
-      maxZoom={18}
-      maxBounds={TROJMIASTO_BOUNDS}
-      maxBoundsViscosity={1.0}
-      style={{ height: '100vh', width: '100vw' }}
-    >
-    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
-    {filteredVehicles.map(v => (
-      <VehicleMarker
-        key={v.vehicleId}
-        vehicleId={v.vehicleId}
-        routeId={v.routeId}
-        lat={v.latitude}
-        lon={v.longitude}
+      <RouteFilter
+        routes={availableRoutes}
+        selected={selectedRoute}
+        onChange={setSelectedRoute}
+        count={filteredVehicles.length}
       />
-  ))}
-    </MapContainer>
-  </div>
+
+      {filteredVehicles.length === 0 && (
+        <NoVehiclesOverlay />
+      )}
+
+      <MapContainer
+        center={[54.3520, 18.6466]}
+        zoom={13}
+        style={{ height: '100vh', width: '100vw' }}
+      >
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+
+        {filteredVehicles.map(v => (
+          <VehicleMarker
+            key={v.vehicleId}
+            vehicleId={v.vehicleId}
+            routeId={v.routeId}
+            lat={v.latitude}
+            lon={v.longitude}
+          />
+        ))}
+      </MapContainer>
+    </div>
   );
 }
 
